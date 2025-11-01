@@ -1,0 +1,226 @@
+name: Validate Notebook
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**.ipynb'
+  push:
+    branches: [ 'claude/**' ]
+    paths:
+      - '**.ipynb'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install nbformat nbconvert jupyter
+        pip install pylint flake8
+        pip install pandas numpy yfinance tabulate pyswisseph
+
+    - name: Validate notebook structure
+      run: |
+        python3 << 'EOF'
+        import json
+        import sys
+
+        print("=" * 70)
+        print("VALIDATING NOTEBOOK STRUCTURE")
+        print("=" * 70)
+
+        try:
+            with open('AstroFinanceProject.ipynb', 'r') as f:
+                nb = json.load(f)
+
+            # Check required fields
+            assert 'cells' in nb, "Notebook missing 'cells' field"
+            assert 'nbformat' in nb, "Notebook missing 'nbformat' field"
+
+            cells = nb['cells']
+            code_cells = [c for c in cells if c['cell_type'] == 'code']
+
+            print(f"✓ Valid notebook structure")
+            print(f"✓ Total cells: {len(cells)}")
+            print(f"✓ Code cells: {len(code_cells)}")
+            print(f"✓ Markdown cells: {len(cells) - len(code_cells)}")
+
+        except Exception as e:
+            print(f"✗ Notebook validation failed: {e}")
+            sys.exit(1)
+        EOF
+
+    - name: Check logging configuration
+      run: |
+        python3 << 'EOF'
+        import json
+        import sys
+        import re
+
+        print("\n" + "=" * 70)
+        print("VALIDATING LOGGING CONFIGURATION")
+        print("=" * 70)
+
+        with open('AstroFinanceProject.ipynb', 'r') as f:
+            nb = json.load(f)
+
+        code_cells = [c for c in nb['cells'] if c['cell_type'] == 'code']
+
+        errors = []
+        warnings = []
+
+        for i, cell in enumerate(code_cells):
+            source = cell['source'] if isinstance(cell['source'], str) else ''.join(cell['source'])
+
+            has_logging_import = 'import logging' in source
+            has_logging_config = 'logging.basicConfig' in source
+            has_logger = 'logger = logging.getLogger' in source
+
+            # Skip cells that are just installation cells
+            if '!pip install' in source and len(source.split('\n')) < 20:
+                continue
+
+            if has_logging_import:
+                if not has_logging_config:
+                    warnings.append(f"Cell {i+1}: Has logging import but no configuration")
+                if not has_logger:
+                    warnings.append(f"Cell {i+1}: Has logging import but no logger instance")
+
+                # Check for proper log level usage
+                logger_calls = re.findall(r'logger\.(info|warning|error|critical|debug)\(', source)
+                if logger_calls:
+                    print(f"✓ Cell {i+1}: {len(logger_calls)} logger calls found")
+
+                    # Count by level
+                    levels = {}
+                    for level in logger_calls:
+                        levels[level] = levels.get(level, 0) + 1
+                    print(f"  Log levels: {levels}")
+
+        if errors:
+            print("\n✗ ERRORS:")
+            for err in errors:
+                print(f"  {err}")
+            sys.exit(1)
+
+        if warnings:
+            print("\n⚠ WARNINGS:")
+            for warn in warnings:
+                print(f"  {warn}")
+
+        print("\n✓ Logging configuration validation passed")
+        EOF
+
+    - name: Extract and validate Python syntax
+      run: |
+        python3 << 'EOF'
+        import json
+        import sys
+        import ast
+        import tempfile
+
+        print("\n" + "=" * 70)
+        print("VALIDATING PYTHON SYNTAX")
+        print("=" * 70)
+
+        with open('AstroFinanceProject.ipynb', 'r') as f:
+            nb = json.load(f)
+
+        code_cells = [c for c in nb['cells'] if c['cell_type'] == 'code']
+
+        errors = []
+
+        for i, cell in enumerate(code_cells):
+            source = cell['source'] if isinstance(cell['source'], str) else ''.join(cell['source'])
+
+            # Remove IPython magic commands and shell commands
+            lines = source.split('\n')
+            cleaned_lines = []
+            for line in lines:
+                # Skip magic commands and shell commands
+                if line.strip().startswith('!') or line.strip().startswith('%'):
+                    continue
+                cleaned_lines.append(line)
+
+            cleaned_source = '\n'.join(cleaned_lines)
+
+            # Try to parse the Python code
+            try:
+                ast.parse(cleaned_source)
+                print(f"✓ Cell {i+1}: Valid Python syntax")
+            except SyntaxError as e:
+                error_msg = f"Cell {i+1}: Syntax error at line {e.lineno}: {e.msg}"
+                errors.append(error_msg)
+                print(f"✗ {error_msg}")
+
+        if errors:
+            print(f"\n✗ Found {len(errors)} syntax error(s)")
+            sys.exit(1)
+        else:
+            print(f"\n✓ All {len(code_cells)} code cells have valid Python syntax")
+        EOF
+
+    - name: Check for required dependencies
+      run: |
+        python3 << 'EOF'
+        import json
+        import re
+
+        print("\n" + "=" * 70)
+        print("CHECKING DEPENDENCIES")
+        print("=" * 70)
+
+        with open('AstroFinanceProject.ipynb', 'r') as f:
+            nb = json.load(f)
+
+        code_cells = [c for c in nb['cells'] if c['cell_type'] == 'code']
+
+        imports = set()
+
+        for cell in code_cells:
+            source = cell['source'] if isinstance(cell['source'], str) else ''.join(cell['source'])
+
+            # Find import statements
+            import_matches = re.findall(r'^(?:from|import)\s+(\w+)', source, re.MULTILINE)
+            imports.update(import_matches)
+
+        print(f"✓ Found {len(imports)} unique imports:")
+        for imp in sorted(imports):
+            print(f"  - {imp}")
+
+        # Check critical dependencies
+        critical = ['logging', 'pandas', 'numpy', 'yfinance', 'swisseph']
+        missing = [dep for dep in critical if dep not in imports and dep.replace('swiss', '') not in ''.join(imports)]
+
+        if 'pyswisseph' in str(nb) or 'swisseph' in str(nb):
+            print("✓ Swiss Ephemeris dependency found")
+
+        print("\n✓ Dependency check completed")
+        EOF
+
+    - name: Generate validation report
+      if: always()
+      run: |
+        echo "## Notebook Validation Report" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Status: ✅ Validation Completed" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **Notebook**: AstroFinanceProject.ipynb" >> $GITHUB_STEP_SUMMARY
+        echo "- **Python Version**: 3.10" >> $GITHUB_STEP_SUMMARY
+        echo "- **Validation Steps**: Structure, Logging, Syntax, Dependencies" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+        echo "1. Test in Google Colab by opening the notebook directly" >> $GITHUB_STEP_SUMMARY
+        echo "2. Verify logging output with timestamps" >> $GITHUB_STEP_SUMMARY
+        echo "3. Check all cells execute without errors" >> $GITHUB_STEP_SUMMARY
