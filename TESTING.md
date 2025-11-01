@@ -60,11 +60,12 @@ Run all cells sequentially to ensure:
 ### What to Look For
 
 **✅ Expected behavior:**
-- Timestamps on every log line
+- Timestamps on every log line: `2025-11-01 06:09:15 | INFO     | Message`
 - Log level indicators (INFO, WARNING, ERROR, CRITICAL)
 - Preserved visual formatting (emojis, checkmarks, progress bars)
 - Tabulated output still displays as formatted tables
 - No duplicate logging configuration warnings
+- **All logger calls now visible in output** (uses custom NotebookHandler with print())
 
 **❌ Issues to report:**
 - Missing timestamps
@@ -72,6 +73,7 @@ Run all cells sequentially to ensure:
 - Broken table formatting
 - Syntax errors
 - Import errors
+- Logger output not visible
 
 ## Option 2: Automated Validation with GitHub Actions
 
